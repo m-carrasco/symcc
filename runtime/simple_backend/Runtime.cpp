@@ -66,6 +66,8 @@ Z3_ast g_null_pointer, g_true, g_false;
 
 FILE *g_log = stderr;
 
+Z3_ast path_condition;
+
 #ifndef NDEBUG
 [[maybe_unused]] void dump_known_regions() {
   std::cerr << "Known regions:" << std::endl;
@@ -149,6 +151,9 @@ void _sym_initialize(void) {
   Z3_inc_ref(g_context, g_true);
   g_false = Z3_mk_false(g_context);
   Z3_inc_ref(g_context, g_false);
+
+  path_condition = Z3_mk_true(g_context);
+  Z3_inc_ref(g_context, path_condition);
 
   if (g_config.logFile.empty()) {
     g_log = stderr;
@@ -436,6 +441,23 @@ void _sym_push_path_constraint(Z3_ast constraint, int taken,
   if (constraint == nullptr)
     return;
 
+  if (getenv("SYMCC_ONLY_PATH_CONDITION")){
+    constraint = Z3_simplify(g_context, constraint);
+    Z3_inc_ref(g_context, constraint);
+
+    Z3_ast not_constraint = Z3_mk_not(g_context, constraint);
+    Z3_inc_ref(g_context, not_constraint);
+    Z3_ast newConstraint = (taken ? constraint : not_constraint);
+
+    Z3_ast arr[2] = {path_condition, newConstraint};
+    path_condition = Z3_mk_and(g_context, 2, arr);
+    Z3_inc_ref(g_context, path_condition);
+
+    Z3_dec_ref(g_context, constraint);
+    Z3_dec_ref(g_context, not_constraint);
+    return;
+  }
+
   constraint = Z3_simplify(g_context, constraint);
   Z3_inc_ref(g_context, constraint);
 
@@ -571,4 +593,12 @@ void symcc_set_test_case_handler(TestCaseHandler) {
   fprintf(
       g_log,
       "Warning: test-case handlers aren't supported in the simple backend\n");
+}
+
+const char * symcc_get_path_condition(){
+  // Printing the solver state allow us 
+  // to include all variable definitions in the string.
+  Z3_solver sol = Z3_mk_solver(g_context);
+  Z3_solver_assert(g_context, sol, Z3_simplify(g_context, path_condition));
+  return Z3_solver_to_string(g_context, sol);
 }
